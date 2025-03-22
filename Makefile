@@ -3,7 +3,7 @@ build:
 	npm run build
 
 deploy-ghpage:
-	git checkout --orphan ghpage
+	git show-ref --verify --quiet refs/heads/ghpage || git checkout --orphan ghpage || git checkout ghpage
 	cp -a dist/* .
 	git add assets/.*
 	git add index.html
