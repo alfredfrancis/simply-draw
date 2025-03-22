@@ -63,15 +63,39 @@ const App: React.FC = () => {
     // Clear canvas
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     
-    // Redraw all paths
+    // Redraw all paths with smooth curves
     drawingActions.forEach(path => {
       ctx.beginPath();
       ctx.strokeStyle = '#000000';
-      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
       
-      for (let i = 0; i < path.length - 1; i++) {
-        ctx.moveTo(path[i].x, path[i].y);
-        ctx.lineTo(path[i + 1].x, path[i + 1].y);
+      if (path.length >= 2) {
+        ctx.moveTo(path[0].x, path[0].y);
+        
+        for (let i = 1; i < path.length - 2; i++) {
+          const xc = (path[i].x + path[i + 1].x) / 2;
+          const yc = (path[i].y + path[i + 1].y) / 2;
+          const speed = Math.sqrt(
+            Math.pow(path[i + 1].x - path[i].x, 2) + 
+            Math.pow(path[i + 1].y - path[i].y, 2)
+          );
+          ctx.lineWidth = Math.max(1, 4 - speed * 0.1);
+          ctx.quadraticCurveTo(path[i].x, path[i].y, xc, yc);
+        }
+        
+        // For the last two points
+        if (path.length > 2) {
+          const lastIndex = path.length - 2;
+          ctx.quadraticCurveTo(
+            path[lastIndex].x,
+            path[lastIndex].y,
+            path[lastIndex + 1].x,
+            path[lastIndex + 1].y
+          );
+        } else {
+          ctx.lineTo(path[1].x, path[1].y);
+        }
       }
       
       ctx.stroke();
@@ -220,11 +244,30 @@ const App: React.FC = () => {
     }
     
     if (isDrawing && context && lastPoint) {
+      // Calculate drawing speed for line width variation
+      const speed = Math.sqrt(
+        Math.pow(x - lastPoint.x, 2) + Math.pow(y - lastPoint.y, 2)
+      );
+      const lineWidth = Math.max(1, 4 - speed * 0.1);
+
+      // Smooth the line using quadratic curves
       context.beginPath();
-      context.moveTo(lastPoint.x, lastPoint.y);
-      context.lineTo(x, y);
+      if (currentPath.length >= 2) {
+        const lastTwoPoints = currentPath.slice(-2);
+        const xc = (lastTwoPoints[1].x + x) / 2;
+        const yc = (lastTwoPoints[1].y + y) / 2;
+        
+        context.moveTo(lastTwoPoints[0].x, lastTwoPoints[0].y);
+        context.quadraticCurveTo(lastTwoPoints[1].x, lastTwoPoints[1].y, xc, yc);
+      } else {
+        context.moveTo(lastPoint.x, lastPoint.y);
+        context.lineTo(x, y);
+      }
+      
       context.strokeStyle = '#000000';
-      context.lineWidth = 2;
+      context.lineWidth = lineWidth;
+      context.lineCap = 'round';
+      context.lineJoin = 'round';
       context.stroke();
       
       // Update current path
