@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { TrashIcon, ArrowDownTrayIcon, PencilIcon } from '@heroicons/react/24/outline';
 
 interface TextElement {
   id: string;
@@ -14,6 +15,9 @@ interface Point {
 
 type DrawingAction = Point[];
 
+// Define tool types
+type ToolType = 'pen' | 'eraser';
+
 const App: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState<boolean>(false);
@@ -28,6 +32,8 @@ const App: React.FC = () => {
   const [mouseIsDown, setMouseIsDown] = useState<boolean>(false);
   const [initialClickPos, setInitialClickPos] = useState<Point | null>(null);
   const [dragThreshold] = useState<number>(5); // pixels to move before considering it a drag
+  const [activeTool, setActiveTool] = useState<ToolType>('pen');
+  const [eraserSize, setEraserSize] = useState<number>(20);
 
   // Initialize canvas context
   useEffect(() => {
@@ -63,43 +69,15 @@ const App: React.FC = () => {
     // Clear canvas
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     
-    // Redraw all paths with smooth curves
+    // Redraw all stored paths with smooth curves
     drawingActions.forEach(path => {
-      ctx.beginPath();
-      ctx.strokeStyle = '#000000';
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      
-      if (path.length >= 2) {
-        ctx.moveTo(path[0].x, path[0].y);
-        
-        for (let i = 1; i < path.length - 2; i++) {
-          const xc = (path[i].x + path[i + 1].x) / 2;
-          const yc = (path[i].y + path[i + 1].y) / 2;
-          const speed = Math.sqrt(
-            Math.pow(path[i + 1].x - path[i].x, 2) + 
-            Math.pow(path[i + 1].y - path[i].y, 2)
-          );
-          ctx.lineWidth = Math.max(1, 4 - speed * 0.1);
-          ctx.quadraticCurveTo(path[i].x, path[i].y, xc, yc);
-        }
-        
-        // For the last two points
-        if (path.length > 2) {
-          const lastIndex = path.length - 2;
-          ctx.quadraticCurveTo(
-            path[lastIndex].x,
-            path[lastIndex].y,
-            path[lastIndex + 1].x,
-            path[lastIndex + 1].y
-          );
-        } else {
-          ctx.lineTo(path[1].x, path[1].y);
-        }
-      }
-      
-      ctx.stroke();
+      drawPath(ctx, path);
     });
+    
+    // Draw current path if drawing
+    if (isDrawing && currentPath.length >= 2) {
+      drawPath(ctx, currentPath);
+    }
     
     // Redraw all text elements
     ctx.font = '16px Arial';
@@ -126,6 +104,53 @@ const App: React.FC = () => {
         ctx.stroke();
       }
     }
+
+    // Draw eraser preview if eraser is active and mouse is down
+    if (activeTool === 'eraser' && mouseIsDown && lastPoint) {
+      ctx.beginPath();
+      ctx.strokeStyle = '#cccccc';
+      ctx.lineWidth = 1;
+      ctx.arc(lastPoint.x, lastPoint.y, eraserSize / 2, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  };
+
+  // Helper function to draw a path with smooth curves
+  const drawPath = (ctx: CanvasRenderingContext2D, path: Point[]): void => {
+    if (!ctx || path.length < 2) return;
+    
+    ctx.beginPath();
+    ctx.strokeStyle = '#000000';
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    
+    ctx.moveTo(path[0].x, path[0].y);
+    
+    for (let i = 1; i < path.length - 2; i++) {
+      const xc = (path[i].x + path[i + 1].x) / 2;
+      const yc = (path[i].y + path[i + 1].y) / 2;
+      const speed = Math.sqrt(
+        Math.pow(path[i + 1].x - path[i].x, 2) + 
+        Math.pow(path[i + 1].y - path[i].y, 2)
+      );
+      ctx.lineWidth = Math.max(1, 4 - speed * 0.1);
+      ctx.quadraticCurveTo(path[i].x, path[i].y, xc, yc);
+    }
+    
+    // For the last two points
+    if (path.length > 2) {
+      const lastIndex = path.length - 2;
+      ctx.quadraticCurveTo(
+        path[lastIndex].x,
+        path[lastIndex].y,
+        path[lastIndex + 1].x,
+        path[lastIndex + 1].y
+      );
+    } else {
+      ctx.lineTo(path[1].x, path[1].y);
+    }
+    
+    ctx.stroke();
   };
 
   // Use effect to redraw canvas when data changes
@@ -133,7 +158,7 @@ const App: React.FC = () => {
     if (context) {
       redrawCanvas(context);
     }
-  }, [context, textElements, drawingActions, isTyping, activeTextId]);
+  }, [context, textElements, drawingActions, isTyping, activeTextId, activeTool, mouseIsDown, lastPoint, currentPath, isDrawing]);
 
   // Add cursor blink effect
   useEffect(() => {
@@ -144,7 +169,7 @@ const App: React.FC = () => {
     }, 500);
     
     return () => clearInterval(blinkInterval);
-  }, [isTyping, textElements, drawingActions]);
+  }, [isTyping, textElements, drawingActions, context]);
 
   // Create new text element at specified position
   const createTextAtPosition = (x: number, y: number): string => {
@@ -176,6 +201,90 @@ const App: React.FC = () => {
     setActiveTextId(null);
   };
 
+  // Check if eraser intersects with a drawing path
+  const checkEraserIntersection = (eraserX: number, eraserY: number): { actionIndex: number, pointIndices: number[] }[] => {
+    const intersections: { actionIndex: number, pointIndices: number[] }[] = [];
+    
+    drawingActions.forEach((path, actionIndex) => {
+      const pointIndices: number[] = [];
+      
+      path.forEach((point, pointIndex) => {
+        const distance = Math.sqrt(
+          Math.pow(point.x - eraserX, 2) + 
+          Math.pow(point.y - eraserY, 2)
+        );
+        
+        if (distance <= eraserSize / 2) {
+          pointIndices.push(pointIndex);
+        }
+      });
+      
+      if (pointIndices.length > 0) {
+        intersections.push({ actionIndex, pointIndices });
+      }
+    });
+    
+    return intersections;
+  };
+
+  // Apply eraser to delete drawing points
+  const applyEraser = (eraserX: number, eraserY: number): void => {
+    const intersections = checkEraserIntersection(eraserX, eraserY);
+    
+    if (intersections.length === 0) return;
+    
+    // Create a new array of drawing actions, removing intersected points
+    const newDrawingActions = [...drawingActions];
+    
+    // Process intersections in reverse order to avoid index issues
+    intersections.reverse().forEach(({ actionIndex, pointIndices }) => {
+      if (pointIndices.length === newDrawingActions[actionIndex].length) {
+        // If all points in the path are intersected, remove the entire path
+        newDrawingActions.splice(actionIndex, 1);
+      } else if (pointIndices.length === 1) {
+        // If only one point is intersected, check if it splits the path
+        const pointIndex = pointIndices[0];
+        
+        if (pointIndex === 0 || pointIndex === newDrawingActions[actionIndex].length - 1) {
+          // If it's the first or last point, just remove that point
+          newDrawingActions[actionIndex] = newDrawingActions[actionIndex].filter((_, i) => i !== pointIndex);
+        } else {
+          // If it's in the middle, split the path into two
+          const pathBefore = newDrawingActions[actionIndex].slice(0, pointIndex);
+          const pathAfter = newDrawingActions[actionIndex].slice(pointIndex + 1);
+          
+          // Replace the current path with the first part
+          newDrawingActions[actionIndex] = pathBefore;
+          
+          // Add the second part as a new path if it has at least 2 points
+          if (pathAfter.length >= 2) {
+            newDrawingActions.push(pathAfter);
+          }
+        }
+      } else {
+        // If multiple points are intersected, we need to handle more complex splitting
+        // Sort point indices in descending order to avoid index issues when removing
+        pointIndices.sort((a, b) => b - a);
+        
+        // Create a new path without the intersected points
+        const newPath = [...newDrawingActions[actionIndex]];
+        pointIndices.forEach(index => {
+          newPath.splice(index, 1);
+        });
+        
+        // If the path still has enough points, keep it
+        if (newPath.length >= 2) {
+          newDrawingActions[actionIndex] = newPath;
+        } else {
+          // Otherwise, remove the entire path
+          newDrawingActions.splice(actionIndex, 1);
+        }
+      }
+    });
+    
+    setDrawingActions(newDrawingActions);
+  };
+
   // Handle mouse events for drawing and text positioning
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>): void => {
     if (!canvasRef.current) return;
@@ -188,6 +297,11 @@ const App: React.FC = () => {
     setMouseDownTime(Date.now());
     setLastPoint({ x, y });
     setInitialClickPos({ x, y });
+    
+    if (activeTool === 'eraser') {
+      applyEraser(x, y);
+      return;
+    }
     
     // Check if clicked on existing text
     const clickedTextIndex = textElements.findIndex(text => {
@@ -226,6 +340,13 @@ const App: React.FC = () => {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     
+    // If eraser tool is active, apply eraser at current position
+    if (activeTool === 'eraser') {
+      applyEraser(x, y);
+      setLastPoint({ x, y });
+      return;
+    }
+    
     // Detect if we've moved enough to consider it a drag
     if (initialClickPos && 
         (Math.abs(x - initialClickPos.x) > dragThreshold || 
@@ -243,35 +364,9 @@ const App: React.FC = () => {
       }
     }
     
-    if (isDrawing && context && lastPoint) {
-      // Calculate drawing speed for line width variation
-      const speed = Math.sqrt(
-        Math.pow(x - lastPoint.x, 2) + Math.pow(y - lastPoint.y, 2)
-      );
-      const lineWidth = Math.max(1, 4 - speed * 0.1);
-
-      // Smooth the line using quadratic curves
-      context.beginPath();
-      if (currentPath.length >= 2) {
-        const lastTwoPoints = currentPath.slice(-2);
-        const xc = (lastTwoPoints[1].x + x) / 2;
-        const yc = (lastTwoPoints[1].y + y) / 2;
-        
-        context.moveTo(lastTwoPoints[0].x, lastTwoPoints[0].y);
-        context.quadraticCurveTo(lastTwoPoints[1].x, lastTwoPoints[1].y, xc, yc);
-      } else {
-        context.moveTo(lastPoint.x, lastPoint.y);
-        context.lineTo(x, y);
-      }
-      
-      context.strokeStyle = '#000000';
-      context.lineWidth = lineWidth;
-      context.lineCap = 'round';
-      context.lineJoin = 'round';
-      context.stroke();
-      
-      // Update current path
-      setCurrentPath([...currentPath, { x, y }]);
+    if (isDrawing) {
+      // Update current path - this will trigger a redraw
+      setCurrentPath(prevPath => [...prevPath, { x, y }]);
     }
     
     setLastPoint({ x, y });
@@ -284,7 +379,8 @@ const App: React.FC = () => {
     
     // If it was a click (not a drag) and we're not already typing
     if (!wasDrawing && !isTyping && 
-        Date.now() - mouseDownTime < 200) { // Short click
+        Date.now() - mouseDownTime < 200 && // Short click
+        activeTool === 'pen') { // Only create text in pen mode
       const rect = canvasRef.current.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
@@ -295,12 +391,12 @@ const App: React.FC = () => {
     
     // If we were drawing, save the path
     if (wasDrawing && currentPath.length > 1) {
-      setDrawingActions([...drawingActions, currentPath]);
+      setDrawingActions(prevActions => [...prevActions, currentPath]);
+      setCurrentPath([]);
     }
     
     setMouseIsDown(false);
     setIsDrawing(false);
-    setCurrentPath([]);
     setInitialClickPos(null);
   };
 
@@ -366,17 +462,34 @@ const App: React.FC = () => {
     };
   }, [isTyping, textElements, activeTextId]);
 
+  // Handle download canvas as PNG
+  const handleDownloadCanvas = (): void => {
+    if (!canvasRef.current) return;
+    
+    // Create a temporary link element
+    const link = document.createElement('a');
+    link.download = 'canvas-drawing.png';
+    
+    // Convert canvas to data URL
+    link.href = canvasRef.current.toDataURL('image/png');
+    
+    // Trigger download
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
-    <div className="w-full h-screen overflow-hidden bg-white">
+    <div className="w-full h-screen overflow-hidden bg-white relative">
       <canvas
         ref={canvasRef}
-        className="w-full h-full cursor-crosshair"
+        className={`w-full h-full ${activeTool === 'eraser' ? 'cursor-default' : 'cursor-crosshair'}`}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={() => {
           if (isDrawing && currentPath.length > 1) {
-            setDrawingActions([...drawingActions, currentPath]);
+            setDrawingActions(prevActions => [...prevActions, currentPath]);
           }
           setMouseIsDown(false);
           setIsDrawing(false);
@@ -385,8 +498,38 @@ const App: React.FC = () => {
         tabIndex={0}
         onKeyDown={handleKeyDown}
       />
+      
+      {/* Vertical Toolbar */}
+      <div className="fixed left-4 top-1/2 transform -translate-y-1/2 bg-white rounded-lg shadow-lg p-2 flex flex-col gap-2">
+        <button 
+          className={`p-2 rounded-lg transition-colors ${activeTool === 'pen' ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-100'}`}
+          onClick={() => setActiveTool('pen')}
+          title="Pen Tool"
+        >
+          <PencilIcon className="w-6 h-6" />
+        </button>
+        
+        <button 
+          className={`p-2 rounded-lg transition-colors ${activeTool === 'eraser' ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-100'}`}
+          onClick={() => setActiveTool('eraser')}
+          title="Eraser Tool"
+        >
+          <TrashIcon className="w-6 h-6" />
+        </button>
+        
+        <div className="border-t border-gray-200 my-1"></div>
+        
+        <button 
+          className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+          onClick={handleDownloadCanvas}
+          title="Download as PNG"
+        >
+          <ArrowDownTrayIcon className="w-6 h-6" />
+        </button>
+      </div>
+      
       <div className="fixed bottom-4 left-4 text-sm text-gray-500">
-        {isTyping ? 'Typing Mode' : isDrawing ? 'Drawing Mode' : 'Ready'}
+        {isTyping ? 'Typing Mode' : isDrawing ? 'Drawing Mode' : activeTool === 'eraser' ? 'Eraser Mode' : 'Ready'}
       </div>
     </div>
   );
